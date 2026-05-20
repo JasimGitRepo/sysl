@@ -52,10 +52,8 @@ class WebRtcCameraStreamer(
         if (!isStreaming) return
         isStreaming = false
         
-        // Detach track but do NOT allow WebRTC to take ownership/dispose of it implicitly
         webRtcManager.setLocalVideoTrack(null)
         
-        // Strategy 1: Safe, sequential, unbreakable teardown hierarchy
         runCatching { videoCapturer?.stopCapture() }
         runCatching { videoTrack?.dispose() }
         videoTrack = null

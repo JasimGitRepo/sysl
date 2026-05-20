@@ -12,7 +12,6 @@ class WebRtcAudioStreamer(private val webRtcManager: WebRtcManager) {
         if (isStreaming) return
         val factory = webRtcManager.getFactory() ?: return
 
-        // Completely empty constraints map: Relying entirely on native hardware AEC to prevent double-gating pulses.
         val audioConstraints = MediaConstraints()
 
         audioSource = factory.createAudioSource(audioConstraints)

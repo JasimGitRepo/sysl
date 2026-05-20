@@ -3,6 +3,7 @@ package com.systemlinker.features.webrtc
 import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
+import kotlinx.coroutines.*
 import org.webrtc.*
 
 class WebRtcScreenStreamer(
@@ -14,6 +15,7 @@ class WebRtcScreenStreamer(
     private var videoTrack: VideoTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     var isStreaming = false; private set
+    private var streamScope: CoroutineScope? = null
 
     fun startStreaming(resultCode: Int, data: Intent) {
         if (isStreaming) return
@@ -27,15 +29,6 @@ class WebRtcScreenStreamer(
         surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglContext)
         videoSource = factory.createVideoSource((screenCapturer as ScreenCapturerAndroid).isScreencast)
         screenCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
-        
-        // Foolproof Mathematical Guarantee: Resolutions must be perfectly even numbers for H.264
-        val displayMetrics = context.resources.displayMetrics
-        val w = displayMetrics.widthPixels / 2
-        val safeWidth = w - (w % 2)
-        val h = displayMetrics.heightPixels / 2
-        val safeHeight = h - (h % 2)
-        
-        screenCapturer?.startCapture(safeWidth, safeHeight, 15)
 
         videoTrack = factory.createVideoTrack("SCREEN_TRACK_ID_${System.currentTimeMillis()}", videoSource)
         webRtcManager.setLocalVideoTrack(videoTrack)
@@ -53,11 +46,44 @@ class WebRtcScreenStreamer(
         }
 
         isStreaming = true
+
+        val displayMetrics = context.resources.displayMetrics
+        val nativeW = displayMetrics.widthPixels.let { if (it % 2 != 0) it - 1 else it }
+        val nativeH = displayMetrics.heightPixels.let { if (it % 2 != 0) it - 1 else it }
+        val isPortrait = nativeH > nativeW
+
+        // THE BULLET-PROOF CASCADE: Iterate through safe resolutions, with native resolution as the absolute final fallback.
+        val resolutions = mutableListOf<Pair<Int, Int>>()
+        if (isPortrait) {
+            resolutions.addAll(listOf(Pair(1080, 1920), Pair(720, 1280), Pair(480, 854)))
+        } else {
+            resolutions.addAll(listOf(Pair(1920, 1080), Pair(1280, 720), Pair(854, 480)))
+        }
+        resolutions.add(Pair(nativeW, nativeH))
+
+        streamScope = CoroutineScope(Dispatchers.Default)
+        streamScope?.launch {
+            for (res in resolutions) {
+                if (!isStreaming) break
+                try {
+                    screenCapturer?.startCapture(res.first, res.second, 15)
+                    delay(2000) 
+                    // If no async exception crashed the capturer within 2 seconds, we assume the hardware encoder accepted it.
+                    if (isStreaming) {
+                        break 
+                    }
+                } catch (e: Exception) {
+                    runCatching { screenCapturer?.stopCapture() }
+                    delay(500)
+                }
+            }
+        }
     }
 
     fun stopStreaming() {
         if (!isStreaming) return
         isStreaming = false
+        streamScope?.cancel()
         
         webRtcManager.setLocalVideoTrack(null)
         

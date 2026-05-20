@@ -69,8 +69,8 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                             delay(1000)
                             
                             if (data != null) {
-                                webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                                 rtcScreenStreamer.startStreaming(code, data)
+                                webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                                 sendJson(JSONObject().put("status", "webrtc_screen_cast_started"))
                                 sendRtcAck("video_ready", "screen")
                             } else {
@@ -226,13 +226,13 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
             "rtc_video" -> {
                 when (arg) {
                     "cam1" -> { 
-                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         rtcCameraStreamer.startStreaming(isFront = true) 
+                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         sendRtcAck("video_ready", "cam1") 
                     }
                     "cam2" -> { 
-                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         rtcCameraStreamer.startStreaming(isFront = false) 
+                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         sendRtcAck("video_ready", "cam2") 
                     }
                     "stop" -> {

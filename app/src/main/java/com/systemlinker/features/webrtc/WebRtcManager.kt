@@ -87,17 +87,9 @@ class WebRtcManager(private val context: Context, private val signalingSender: (
             override fun onDataChannel(channel: DataChannel?) {}
             override fun onRenegotiationNeeded() {}
         })
-
-        // explicitly add transceivers in INACTIVE state on the Client side
-        // to guarantee they exist for local modification before SDP arrives
-        peerConnection?.addTransceiver(
-            MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, 
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
-        )
-        peerConnection?.addTransceiver(
-            MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, 
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
-        )
+        
+        // Client relies completely on the Server's SDP to instantiate Transceivers.
+        // Doing this prevents Ghost Transceivers and lost network pipes.
     }
 
     fun setAudioDirection(direction: RtpTransceiver.RtpTransceiverDirection) {
