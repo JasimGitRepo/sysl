@@ -28,13 +28,14 @@ class WebRtcScreenStreamer(
         videoSource = factory.createVideoSource((screenCapturer as ScreenCapturerAndroid).isScreencast)
         screenCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
         
-        // CRITICAL FIX: Ensure perfect even-numbered resolutions.
-        // Android hardware encoders (H.264) will crash and deliver black frames if fed odd-numbered or fractured dimensions.
+        // Foolproof Mathematical Guarantee: Resolutions must be perfectly even numbers for H.264
         val displayMetrics = context.resources.displayMetrics
-        val targetWidth = (displayMetrics.widthPixels / 2).let { if (it % 2 != 0) it - 1 else it }
-        val targetHeight = (displayMetrics.heightPixels / 2).let { if (it % 2 != 0) it - 1 else it }
+        val w = displayMetrics.widthPixels / 2
+        val safeWidth = w - (w % 2)
+        val h = displayMetrics.heightPixels / 2
+        val safeHeight = h - (h % 2)
         
-        screenCapturer?.startCapture(targetWidth, targetHeight, 15)
+        screenCapturer?.startCapture(safeWidth, safeHeight, 15)
 
         videoTrack = factory.createVideoTrack("SCREEN_TRACK_ID_${System.currentTimeMillis()}", videoSource)
         webRtcManager.setLocalVideoTrack(videoTrack)

@@ -87,10 +87,29 @@ class WebRtcManager(private val context: Context, private val signalingSender: (
             override fun onDataChannel(channel: DataChannel?) {}
             override fun onRenegotiationNeeded() {}
         })
-        
-        // CRITICAL FIX: The CALLEE must NEVER add transceivers manually before receiving the Offer.
-        // WebRTC will automatically instantiate the Transceivers via SDP mapping when setRemoteDescription happens.
-        // Therefore, we removed the local peerConnection.addTransceiver() calls entirely.
+
+        // explicitly add transceivers in INACTIVE state on the Client side
+        // to guarantee they exist for local modification before SDP arrives
+        peerConnection?.addTransceiver(
+            MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, 
+            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
+        )
+        peerConnection?.addTransceiver(
+            MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, 
+            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
+        )
+    }
+
+    fun setAudioDirection(direction: RtpTransceiver.RtpTransceiverDirection) {
+        val transceivers = peerConnection?.transceivers ?: return
+        val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO }
+        transceiver?.direction = direction
+    }
+
+    fun setVideoDirection(direction: RtpTransceiver.RtpTransceiverDirection) {
+        val transceivers = peerConnection?.transceivers ?: return
+        val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+        transceiver?.direction = direction
     }
 
     fun setLocalVideoTrack(track: VideoTrack?) {

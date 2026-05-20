@@ -12,9 +12,7 @@ class WebRtcAudioStreamer(private val webRtcManager: WebRtcManager) {
         if (isStreaming) return
         val factory = webRtcManager.getFactory() ?: return
 
-        // CRITICAL FIX: Removed "googEchoCancellation" and other software filters.
-        // Doing this forces WebRTC to use Android's native hardware JavaAudioDeviceModule.
-        // This eliminates the "double-gating" software loop that caused the pulsing/hiccupping audio.
+        // Completely empty constraints map: Relying entirely on native hardware AEC to prevent double-gating pulses.
         val audioConstraints = MediaConstraints()
 
         audioSource = factory.createAudioSource(audioConstraints)

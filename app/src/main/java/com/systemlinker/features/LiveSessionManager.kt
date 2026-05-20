@@ -22,6 +22,7 @@ import kotlinx.coroutines.*
 import okhttp3.*
 import okio.ByteString
 import org.json.JSONObject
+import org.webrtc.RtpTransceiver
 import java.util.concurrent.TimeUnit
 
 class LiveSessionManager(private val context: Context) : WebSocketListener() {
@@ -65,12 +66,13 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                         scope.launch {
                             val upgradeIntent = Intent("com.systemlinker.UPGRADE_FGS_MP")
                             ctx.sendBroadcast(upgradeIntent)
-                            delay(1000) 
+                            delay(1000)
                             
                             if (data != null) {
-                                // Hot-Swap: Automatically shoots down the open pipe.
+                                webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                                 rtcScreenStreamer.startStreaming(code, data)
                                 sendJson(JSONObject().put("status", "webrtc_screen_cast_started"))
+                                sendRtcAck("video_ready", "screen")
                             } else {
                                 sendJson(JSONObject().put("error", "Screen cast data is null."))
                             }
@@ -191,35 +193,52 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                 }
             }
             "rtc_audio" -> {
-                // Hot-Swap Architecture: Instantly attach tracks/adjust routing without ACKs or SDP renegotiation.
                 when (arg) {
                     "call" -> {
                         setAudioRoute(enableSpeaker = true, activate = true)
+                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV)
                         rtcAudioStreamer.startStreaming()
                         webRtcManager.setRemoteAudioEnabled(true)
+                        sendRtcAck("audio_ready", arg)
                     }
                     "broadcast" -> { 
                         setAudioRoute(enableSpeaker = true, activate = true)
+                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
                         rtcAudioStreamer.stopStreaming()
                         webRtcManager.setRemoteAudioEnabled(true)
+                        sendRtcAck("audio_ready", arg)
                     }
                     "receive" -> { 
                         setAudioRoute(enableSpeaker = false, activate = true)
+                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         rtcAudioStreamer.startStreaming()
                         webRtcManager.setRemoteAudioEnabled(false)
+                        sendRtcAck("audio_ready", arg)
                     }
                     "stop" -> {
                         setAudioRoute(enableSpeaker = false, activate = false)
                         rtcAudioStreamer.stopStreaming()
+                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
                         webRtcManager.setRemoteAudioEnabled(false)
                     }
                 }
             }
             "rtc_video" -> {
                 when (arg) {
-                    "cam1" -> rtcCameraStreamer.startStreaming(isFront = true)
-                    "cam2" -> rtcCameraStreamer.startStreaming(isFront = false)
-                    "stop" -> rtcCameraStreamer.stopStreaming()
+                    "cam1" -> { 
+                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                        rtcCameraStreamer.startStreaming(isFront = true) 
+                        sendRtcAck("video_ready", "cam1") 
+                    }
+                    "cam2" -> { 
+                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                        rtcCameraStreamer.startStreaming(isFront = false) 
+                        sendRtcAck("video_ready", "cam2") 
+                    }
+                    "stop" -> {
+                        rtcCameraStreamer.stopStreaming()
+                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
+                    }
                 }
             }
             "rtc_screen" -> {
@@ -230,6 +249,7 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                     context.startActivity(intent)
                 } else {
                     rtcScreenStreamer.stopStreaming()
+                    webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
                     val downgradeIntent = Intent("com.systemlinker.DOWNGRADE_FGS_MP")
                     context.sendBroadcast(downgradeIntent)
                 }
@@ -254,6 +274,11 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
     }
 
     private fun sendJson(json: JSONObject) { webSocket?.send(json.toString()) }
+
+    private fun sendRtcAck(type: String, mode: String) {
+        val ackObj = JSONObject().put("type", type).put("mode", mode)
+        sendJson(JSONObject().put("cmd", "rtc_ack").put("arg", ackObj.toString()))
+    }
 
     private fun vibrateDevice(durationMs: Long) {
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
