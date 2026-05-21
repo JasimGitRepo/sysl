@@ -12,7 +12,13 @@ class WebRtcAudioStreamer(private val webRtcManager: WebRtcManager) {
         if (isStreaming) return
         val factory = webRtcManager.getFactory() ?: return
 
-        val audioConstraints = MediaConstraints()
+        // CRITICAL FIX: Enforce WebRTC Software AEC/AGC to prevent Hardware deadlocks during bidirectional Calls
+        val audioConstraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+        }
 
         audioSource = factory.createAudioSource(audioConstraints)
         audioTrack = factory.createAudioTrack("AUDIO_TRACK_ID_${System.currentTimeMillis()}", audioSource)

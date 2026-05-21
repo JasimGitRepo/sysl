@@ -7,7 +7,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
-import kotlinx.coroutines.*
 import org.webrtc.*
 
 class WebRtcScreenStreamer(
@@ -20,7 +19,6 @@ class WebRtcScreenStreamer(
     private var videoTrack: VideoTrack? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     var isStreaming = false; private set
-    private var streamScope: CoroutineScope? = null
 
     private fun logAndNotify(msg: String, e: Throwable? = null) {
         val fullMsg = if (e != null) "$msg: ${e.message}" else msg
@@ -38,7 +36,10 @@ class WebRtcScreenStreamer(
 
         try {
             screenCapturer = ScreenCapturerAndroid(data, object : MediaProjection.Callback() {
-                override fun onStop() { stopStreaming() }
+                override fun onStop() { 
+                    logAndNotify("MediaProjection Stopped by OS")
+                    stopStreaming() 
+                }
             })
 
             surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglContext)
@@ -48,45 +49,16 @@ class WebRtcScreenStreamer(
             videoTrack = factory.createVideoTrack("SCREEN_TRACK_ID_${System.currentTimeMillis()}", videoSource)
             webRtcManager.setLocalVideoTrack(videoTrack)
 
-            isStreaming = true
-
+            // CRITICAL FIX: VirtualDisplay requires strict Native Display bounds.
             val displayMetrics = context.resources.displayMetrics
-            val nativeW = displayMetrics.widthPixels.let { if (it % 2 != 0) it - 1 else it }
-            val nativeH = displayMetrics.heightPixels.let { if (it % 2 != 0) it - 1 else it }
-            val isPortrait = nativeH > nativeW
+            val nativeW = displayMetrics.widthPixels
+            val nativeH = displayMetrics.heightPixels
 
-            val resolutions = mutableListOf<Pair<Int, Int>>()
-            if (isPortrait) {
-                resolutions.addAll(listOf(Pair(1080, 1920), Pair(720, 1280), Pair(480, 854)))
-            } else {
-                resolutions.addAll(listOf(Pair(1920, 1080), Pair(1280, 720), Pair(854, 480)))
-            }
-            resolutions.add(Pair(nativeW, nativeH))
+            screenCapturer?.startCapture(nativeW, nativeH, 30)
+            isStreaming = true
+            
+            Log.e("ERROR_TO_DEBUG", "Screen captured successfully at ${nativeW}x${nativeH}")
 
-            streamScope = CoroutineScope(Dispatchers.Default)
-            streamScope?.launch {
-                var started = false
-                for (res in resolutions) {
-                    if (!isStreaming) break
-                    try {
-                        screenCapturer?.startCapture(res.first, res.second, 15)
-                        delay(2000) 
-                        if (isStreaming) {
-                            started = true
-                            Log.e("ERROR_TO_DEBUG", "Screen captured successfully at ${res.first}x${res.second}")
-                            break 
-                        }
-                    } catch (e: Exception) {
-                        runCatching { screenCapturer?.stopCapture() }
-                        Log.e("ERROR_TO_DEBUG", "Screen resolution ${res.first}x${res.second} failed", e)
-                        delay(500)
-                    }
-                }
-                if (!started) {
-                    logAndNotify("Failed to start ScreenStreamer at any resolution.")
-                    stopStreaming()
-                }
-            }
         } catch (e: Exception) {
             logAndNotify("Failed to initialize ScreenStreamer", e)
             stopStreaming()
@@ -96,7 +68,6 @@ class WebRtcScreenStreamer(
     fun stopStreaming() {
         if (!isStreaming) return
         isStreaming = false
-        streamScope?.cancel()
         
         webRtcManager.setLocalVideoTrack(null)
         

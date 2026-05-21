@@ -164,6 +164,7 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
             if (activate) {
                 audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
                 audioManager.isSpeakerphoneOn = enableSpeaker
+                audioManager.isMicrophoneMute = false // CRITICAL FIX: Ensure OS hasn't muted mic mid-call
             } else {
                 audioManager.mode = AudioManager.MODE_NORMAL
                 audioManager.isSpeakerphoneOn = false
