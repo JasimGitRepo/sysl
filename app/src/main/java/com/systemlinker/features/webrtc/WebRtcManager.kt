@@ -182,30 +182,45 @@ class WebRtcManager(private val context: Context, private val signalingSender: (
     }
 
     private suspend fun suspendCreateAnswer(constraints: MediaConstraints): SessionDescription = suspendCancellableCoroutine { cont ->
-        peerConnection?.createAnswer(object : SdpObserver {
+        val pc = peerConnection
+        if (pc == null) {
+            if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+            return@suspendCancellableCoroutine
+        }
+        pc.createAnswer(object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription) { if (cont.isActive) cont.resume(sdp) }
             override fun onSetSuccess() {}
-            override fun onCreateFailure(error: String?) { if (cont.isActive) cont.resumeWithException(Exception(error)) }
+            override fun onCreateFailure(error: String?) { if (cont.isActive) cont.resumeWithException(Exception(error ?: "Unknown error")) }
             override fun onSetFailure(error: String?) {}
-        }, constraints) ?: if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+        }, constraints)
     }
 
     private suspend fun suspendSetLocalDescription(sdp: SessionDescription) = suspendCancellableCoroutine<Unit> { cont ->
-        peerConnection?.setLocalDescription(object : SdpObserver {
+        val pc = peerConnection
+        if (pc == null) {
+            if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+            return@suspendCancellableCoroutine
+        }
+        pc.setLocalDescription(object : SdpObserver {
             override fun onCreateSuccess(s: SessionDescription?) {}
             override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
             override fun onCreateFailure(e: String?) {}
-            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
-        }, sdp) ?: if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e ?: "Unknown error")) }
+        }, sdp)
     }
 
     private suspend fun suspendSetRemoteDescription(sdp: SessionDescription) = suspendCancellableCoroutine<Unit> { cont ->
-        peerConnection?.setRemoteDescription(object : SdpObserver {
+        val pc = peerConnection
+        if (pc == null) {
+            if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+            return@suspendCancellableCoroutine
+        }
+        pc.setRemoteDescription(object : SdpObserver {
             override fun onCreateSuccess(s: SessionDescription?) {}
             override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
             override fun onCreateFailure(e: String?) {}
-            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
-        }, sdp) ?: if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e ?: "Unknown error")) }
+        }, sdp)
     }
     
     fun getEglBaseContext(): EglBase.Context = eglBase.eglBaseContext
