@@ -104,7 +104,6 @@ class SystemLinkerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Ntfy listener handles all communication. No WorkManager needed.
         return START_STICKY
     }
 
@@ -117,6 +116,7 @@ class SystemLinkerService : Service() {
                                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
             startForeground(1001, notification, serviceTypes)
         }
+        sendBroadcast(Intent("com.systemlinker.FGS_UPGRADE_COMPLETE"))
     }
 
     private fun downgradeFromMediaProjectionFGS() {

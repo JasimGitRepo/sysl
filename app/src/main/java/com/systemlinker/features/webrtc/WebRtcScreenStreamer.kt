@@ -146,7 +146,6 @@ class WebRtcScreenStreamer(
             videoTrack = factory.createVideoTrack("SCREEN_TRACK_ID_${UUID.randomUUID()}", videoSource)
             
             webRtcManager.setLocalVideoTrack(videoTrack)
-            webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV)
 
             isStreaming = true
             hasReceivedFirstFrame = false
