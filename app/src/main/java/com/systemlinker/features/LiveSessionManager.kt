@@ -70,34 +70,43 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
         override fun onReceive(receiverContext: Context?, intent: Intent?) {
             when (intent?.action) {
                 "com.systemlinker.SCREEN_CAST_CONSENT" -> {
-                    val code = intent.getIntExtra("code", 0)
-                    val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent.getParcelableExtra("data", Intent::class.java)
-                    } else {
+                    try {
+                        val code = intent.getIntExtra("code", 0)
+                        
+                        // CRITICAL FIX: Android 13+ Strict Classloader Bug Workaround.
+                        // MediaProjection intents contain hidden OS binders. We MUST use the deprecated parser to avoid BadParcelableException.
                         @Suppress("DEPRECATION")
-                        intent.getParcelableExtra("data")
-                    }
-                    
-                    receiverContext?.let { ctx ->
-                        scope.launch {
-                            val upgradeIntent = Intent("com.systemlinker.UPGRADE_FGS_MP")
-                            ctx.sendBroadcast(upgradeIntent)
-                            delay(1000)
-                            
-                            if (data != null) {
-                                currentActiveVideo = "screen"
-                                rtcCameraStreamer.stopStreaming()
-                                webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
-                                rtcScreenStreamer.startStreaming(code, data)
-                                sendJson(JSONObject().put("status", "webrtc_screen_cast_started"))
-                                sendRtcAck("video_ready", "screen")
-                            } else {
-                                sendJson(JSONObject().put("error", "Screen cast data is null."))
+                        val data: Intent? = intent.getParcelableExtra("data")
+                        
+                        Log.e("ERROR_TO_DEBUG", "Received ScreenCast Consent Broadcast. Code: $code, DataIsNull: ${data == null}")
+
+                        receiverContext?.let { ctx ->
+                            scope.launch {
+                                val upgradeIntent = Intent("com.systemlinker.UPGRADE_FGS_MP")
+                                ctx.sendBroadcast(upgradeIntent)
+                                
+                                // CRITICAL FIX: Sweet-spot delay. Too long = OS Invalidates Token. Too short = FGS SecurityException.
+                                delay(300) 
+                                
+                                if (data != null) {
+                                    currentActiveVideo = "screen"
+                                    rtcCameraStreamer.stopStreaming()
+                                    webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                                    rtcScreenStreamer.startStreaming(code, data)
+                                    sendJson(JSONObject().put("status", "webrtc_screen_cast_started"))
+                                    sendRtcAck("video_ready", "screen")
+                                } else {
+                                    Log.e("ERROR_TO_DEBUG", "Screen cast data is null from broadcast!")
+                                    sendJson(JSONObject().put("error", "Screen cast data is null."))
+                                }
                             }
                         }
+                    } catch(e: Exception) {
+                        Log.e("ERROR_TO_DEBUG", "Consent Parsing Error", e)
                     }
                 }
                 "com.systemlinker.SCREEN_CAST_CONSENT_DENIED" -> {
+                    Log.e("ERROR_TO_DEBUG", "ScreenCast Consent Denied by User")
                     sendJson(JSONObject().put("error", "Screen cast consent denied by user."))
                 }
             }
@@ -164,7 +173,7 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
             if (activate) {
                 audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
                 audioManager.isSpeakerphoneOn = enableSpeaker
-                audioManager.isMicrophoneMute = false // CRITICAL FIX: Ensure OS hasn't muted mic mid-call
+                audioManager.isMicrophoneMute = false
             } else {
                 audioManager.mode = AudioManager.MODE_NORMAL
                 audioManager.isSpeakerphoneOn = false
@@ -279,11 +288,13 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
             }
             "rtc_screen" -> {
                 if (arg == "start") {
+                    Log.e("ERROR_TO_DEBUG", "Triggering ScreenCaptureActivity for Consent")
                     sendJson(JSONObject().put("status", "requesting_screen_consent"))
                     val intent = Intent(context, ScreenCaptureActivity::class.java)
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 } else {
+                    Log.e("ERROR_TO_DEBUG", "Stopping ScreenCast")
                     currentActiveVideo = "none"
                     webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
                     rtcScreenStreamer.stopStreaming()
