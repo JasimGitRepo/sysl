@@ -98,28 +98,34 @@ class WebRtcScreenStreamer(
         onError(fullMsg)
     }
 
-    fun startStreaming(resultCode: Int, data: Intent) {
+    fun startStreaming(resultCode: Int, data: Intent, onStarted: () -> Unit) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            mainHandler.post { startStreaming(resultCode, data) }
+            mainHandler.post { startStreaming(resultCode, data, onStarted) }
             return
         }
 
-        if (isStreaming || isStopping) return
+        if (isStreaming || isStopping) {
+            onStarted()
+            return
+        }
 
         if (resultCode != Activity.RESULT_OK) {
             logAndNotify("Screen capture permission denied")
+            onStarted()
             return
         }
 
         val factory = webRtcManager.getFactory()
         if (factory == null) {
             logAndNotify("Factory is not initialized")
+            onStarted()
             return
         }
         
         val eglContext = webRtcManager.getEglBaseContext() as? EglBase.Context
         if (eglContext == null) {
             logAndNotify("EGL context unavailable")
+            onStarted()
             return
         }
 
@@ -136,6 +142,7 @@ class WebRtcScreenStreamer(
             surfaceTextureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglContext)
             if (surfaceTextureHelper == null) {
                 logAndNotify("Failed to create SurfaceTextureHelper")
+                onStarted()
                 stopStreaming()
                 return
             }
@@ -164,8 +171,11 @@ class WebRtcScreenStreamer(
             screenCapturer?.startCapture(width, height, 15)
             displayManager.registerDisplayListener(displayListener, mainHandler)
 
+            // Executed strictly after Native Handlers have hooked onto Main Looper to secure the Activity lifecycle
+            onStarted()
         } catch (e: Exception) {
             logAndNotify("Failed to initialize ScreenStreamer", e)
+            onStarted()
             stopStreaming()
         }
     }

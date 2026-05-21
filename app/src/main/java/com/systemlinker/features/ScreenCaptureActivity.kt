@@ -19,8 +19,11 @@ class ScreenCaptureActivity : ComponentActivity() {
     private val fgsUpgradeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.systemlinker.FGS_UPGRADE_COMPLETE") {
-                LiveSessionManager.screenCastCallback?.invoke(pendingResultCode, pendingData)
-                finish()
+                // FIX: Strictly serialize lifecycle execution using the completion lambda 
+                // to prevent System Server MediaProjection crashes caused by premature finish() calls.
+                LiveSessionManager.screenCastCallback?.invoke(pendingResultCode, pendingData) {
+                    finish()
+                }
             }
         }
     }
@@ -34,8 +37,9 @@ class ScreenCaptureActivity : ComponentActivity() {
             val upgradeIntent = Intent("com.systemlinker.UPGRADE_FGS_MP")
             sendBroadcast(upgradeIntent)
         } else {
-            LiveSessionManager.screenCastCallback?.invoke(result.resultCode, null)
-            finish()
+            LiveSessionManager.screenCastCallback?.invoke(result.resultCode, null) {
+                finish()
+            }
         }
     }
 

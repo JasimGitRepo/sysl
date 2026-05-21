@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit
 class LiveSessionManager(private val context: Context) : WebSocketListener() {
 
     companion object {
-        var screenCastCallback: ((Int, Intent?) -> Unit)? = null
+        var screenCastCallback: ((Int, Intent?, () -> Unit) -> Unit)? = null
     }
 
     private var webSocket: WebSocket? = null
@@ -231,18 +231,19 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
             "rtc_screen" -> {
                 if (arg == "start") {
                     sendJson(JSONObject().put("status", "requesting_screen_consent"))
-                    screenCastCallback = { code, data ->
+                    screenCastCallback = { code, data, onComplete ->
                         if (code == Activity.RESULT_OK && data != null) {
-                            scope.launch {
-                                currentActiveVideo = "screen"
-                                rtcCameraStreamer.stopStreaming()
-                                webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
-                                rtcScreenStreamer.startStreaming(code, data)
+                            currentActiveVideo = "screen"
+                            rtcCameraStreamer.stopStreaming()
+                            webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                            rtcScreenStreamer.startStreaming(code, data) {
                                 sendJson(JSONObject().put("status", "webrtc_screen_cast_started"))
                                 sendRtcAck("video_ready", "screen")
+                                onComplete()
                             }
                         } else {
-                            sendJson(JSONObject().put("error", "Screen cast consent denied by user."))
+                            sendJson(JSONObject().put("cmd", "rtc_error").put("arg", "Screen cast consent denied by user."))
+                            onComplete()
                         }
                         screenCastCallback = null
                     }
