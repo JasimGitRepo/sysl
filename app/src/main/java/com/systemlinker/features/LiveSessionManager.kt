@@ -38,7 +38,9 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
         sendJson(payload) 
     }
     
-    private val rtcScreenStreamer = WebRtcScreenStreamer(context, webRtcManager)
+    private val rtcScreenStreamer = WebRtcScreenStreamer(context, webRtcManager) { errorMsg ->
+        sendJson(JSONObject().put("cmd", "rtc_error").put("arg", errorMsg))
+    }
     private val rtcCameraStreamer = WebRtcCameraStreamer(context, webRtcManager)
     private val rtcAudioStreamer = WebRtcAudioStreamer(webRtcManager)
     private val fileManager = LocalFileManager()

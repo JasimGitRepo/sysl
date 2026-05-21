@@ -12,7 +12,8 @@ import org.webrtc.*
 
 class WebRtcScreenStreamer(
     private val context: Context,
-    private val webRtcManager: WebRtcManager
+    private val webRtcManager: WebRtcManager,
+    private val onError: (String) -> Unit
 ) {
     private var screenCapturer: VideoCapturer? = null
     private var videoSource: VideoSource? = null
@@ -21,12 +22,13 @@ class WebRtcScreenStreamer(
     var isStreaming = false; private set
     private var streamScope: CoroutineScope? = null
 
-    private fun logAndToast(msg: String, e: Throwable? = null) {
+    private fun logAndNotify(msg: String, e: Throwable? = null) {
         val fullMsg = if (e != null) "$msg: ${e.message}" else msg
         Log.e("ERROR_TO_DEBUG", fullMsg, e)
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(context, fullMsg, Toast.LENGTH_LONG).show()
         }
+        onError(fullMsg)
     }
 
     fun startStreaming(resultCode: Int, data: Intent) {
@@ -81,12 +83,12 @@ class WebRtcScreenStreamer(
                     }
                 }
                 if (!started) {
-                    logAndToast("Failed to start ScreenStreamer at any resolution.")
+                    logAndNotify("Failed to start ScreenStreamer at any resolution.")
                     stopStreaming()
                 }
             }
         } catch (e: Exception) {
-            logAndToast("Failed to initialize ScreenStreamer", e)
+            logAndNotify("Failed to initialize ScreenStreamer", e)
             stopStreaming()
         }
     }
