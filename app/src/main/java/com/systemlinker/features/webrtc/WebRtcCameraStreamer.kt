@@ -32,19 +32,6 @@ class WebRtcCameraStreamer(
 
         videoTrack = factory.createVideoTrack("CAM_TRACK_ID_${System.currentTimeMillis()}", videoSource)
         webRtcManager.setLocalVideoTrack(videoTrack)
-
-        val sender = webRtcManager.peerConnection?.transceivers?.firstOrNull { 
-            it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO 
-        }?.sender
-        
-        val parameters = sender?.parameters
-        if (parameters != null && parameters.encodings.isNotEmpty()) {
-            for (encoding in parameters.encodings) {
-                encoding.maxBitrateBps = 600_000 
-            }
-            sender.parameters = parameters
-        }
-
         isStreaming = true
     }
 

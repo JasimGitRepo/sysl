@@ -33,18 +33,6 @@ class WebRtcScreenStreamer(
         videoTrack = factory.createVideoTrack("SCREEN_TRACK_ID_${System.currentTimeMillis()}", videoSource)
         webRtcManager.setLocalVideoTrack(videoTrack)
 
-        val sender = webRtcManager.peerConnection?.transceivers?.firstOrNull { 
-            it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO 
-        }?.sender
-        
-        val parameters = sender?.parameters
-        if (parameters != null && parameters.encodings.isNotEmpty()) {
-            for (encoding in parameters.encodings) {
-                encoding.maxBitrateBps = 800_000 
-            }
-            sender.parameters = parameters
-        }
-
         isStreaming = true
 
         val displayMetrics = context.resources.displayMetrics
@@ -52,7 +40,6 @@ class WebRtcScreenStreamer(
         val nativeH = displayMetrics.heightPixels.let { if (it % 2 != 0) it - 1 else it }
         val isPortrait = nativeH > nativeW
 
-        // THE BULLET-PROOF CASCADE: Iterate through safe resolutions, with native resolution as the absolute final fallback.
         val resolutions = mutableListOf<Pair<Int, Int>>()
         if (isPortrait) {
             resolutions.addAll(listOf(Pair(1080, 1920), Pair(720, 1280), Pair(480, 854)))
@@ -68,7 +55,6 @@ class WebRtcScreenStreamer(
                 try {
                     screenCapturer?.startCapture(res.first, res.second, 15)
                     delay(2000) 
-                    // If no async exception crashed the capturer within 2 seconds, we assume the hardware encoder accepted it.
                     if (isStreaming) {
                         break 
                     }

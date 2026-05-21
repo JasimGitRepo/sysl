@@ -22,7 +22,6 @@ import kotlinx.coroutines.*
 import okhttp3.*
 import okio.ByteString
 import org.json.JSONObject
-import org.webrtc.RtpTransceiver
 import java.util.concurrent.TimeUnit
 
 class LiveSessionManager(private val context: Context) : WebSocketListener() {
@@ -47,6 +46,8 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
         .build()
         
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var telemetryJob: Job? = null
+    private var currentActiveVideo = "none"
     private var isStreamingSensors = false
     private var sensorManager: SensorManager? = null
 
@@ -69,8 +70,9 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                             delay(1000)
                             
                             if (data != null) {
+                                currentActiveVideo = "screen"
+                                rtcCameraStreamer.stopStreaming()
                                 rtcScreenStreamer.startStreaming(code, data)
-                                webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                                 sendJson(JSONObject().put("status", "webrtc_screen_cast_started"))
                                 sendRtcAck("video_ready", "screen")
                             } else {
@@ -101,9 +103,20 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
         } else {
             context.registerReceiver(systemDataReceiver, filter)
         }
+        
+        telemetryJob = scope.launch {
+            while(isActive) {
+                delay(3000)
+                val statusArg = JSONObject()
+                    .put("mic", rtcAudioStreamer.isStreaming)
+                    .put("vid", currentActiveVideo)
+                sendJson(JSONObject().put("cmd", "telemetry").put("arg", statusArg.toString()))
+            }
+        }
     }
 
     fun disconnect() {
+        telemetryJob?.cancel()
         stopAllWebRtcStreams()
         stopSensorStream()
         
@@ -122,6 +135,7 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
 
     private fun stopAllWebRtcStreams() {
         setAudioRoute(enableSpeaker = false, activate = false)
+        currentActiveVideo = "none"
         rtcScreenStreamer.stopStreaming()
         rtcCameraStreamer.stopStreaming()
         rtcAudioStreamer.stopStreaming()
@@ -196,21 +210,18 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                 when (arg) {
                     "call" -> {
                         setAudioRoute(enableSpeaker = true, activate = true)
-                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV)
                         rtcAudioStreamer.startStreaming()
                         webRtcManager.setRemoteAudioEnabled(true)
                         sendRtcAck("audio_ready", arg)
                     }
                     "broadcast" -> { 
                         setAudioRoute(enableSpeaker = true, activate = true)
-                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
                         rtcAudioStreamer.stopStreaming()
                         webRtcManager.setRemoteAudioEnabled(true)
                         sendRtcAck("audio_ready", arg)
                     }
                     "receive" -> { 
                         setAudioRoute(enableSpeaker = false, activate = true)
-                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         rtcAudioStreamer.startStreaming()
                         webRtcManager.setRemoteAudioEnabled(false)
                         sendRtcAck("audio_ready", arg)
@@ -218,7 +229,6 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                     "stop" -> {
                         setAudioRoute(enableSpeaker = false, activate = false)
                         rtcAudioStreamer.stopStreaming()
-                        webRtcManager.setAudioDirection(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
                         webRtcManager.setRemoteAudioEnabled(false)
                     }
                 }
@@ -226,18 +236,20 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
             "rtc_video" -> {
                 when (arg) {
                     "cam1" -> { 
+                        currentActiveVideo = "cam1"
+                        rtcScreenStreamer.stopStreaming()
                         rtcCameraStreamer.startStreaming(isFront = true) 
-                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         sendRtcAck("video_ready", "cam1") 
                     }
                     "cam2" -> { 
+                        currentActiveVideo = "cam2"
+                        rtcScreenStreamer.stopStreaming()
                         rtcCameraStreamer.startStreaming(isFront = false) 
-                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
                         sendRtcAck("video_ready", "cam2") 
                     }
                     "stop" -> {
+                        currentActiveVideo = "none"
                         rtcCameraStreamer.stopStreaming()
-                        webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
                     }
                 }
             }
@@ -248,8 +260,8 @@ class LiveSessionManager(private val context: Context) : WebSocketListener() {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 } else {
+                    currentActiveVideo = "none"
                     rtcScreenStreamer.stopStreaming()
-                    webRtcManager.setVideoDirection(RtpTransceiver.RtpTransceiverDirection.INACTIVE)
                     val downgradeIntent = Intent("com.systemlinker.DOWNGRADE_FGS_MP")
                     context.sendBroadcast(downgradeIntent)
                 }

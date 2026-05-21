@@ -1,16 +1,42 @@
 package com.systemlinker.features.webrtc
 
 import android.content.Context
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import org.json.JSONObject
 import org.webrtc.*
-import org.webrtc.PeerConnection.IceServer
 import org.webrtc.audio.JavaAudioDeviceModule
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class WebRtcManager(private val context: Context, private val signalingSender: (String) -> Unit) {
 
     private val eglBase: EglBase by lazy { EglBase.create() }
     private var peerConnectionFactory: PeerConnectionFactory? = null
     var peerConnection: PeerConnection? = null
+
+    private val actionQueue = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    
+    private var sdpGeneration = 0
+    private var isRemoteDescriptionSet = false
+    private val iceCache = mutableListOf<IceCandidate>()
+
+    init {
+        scope.launch {
+            for (action in actionQueue) {
+                try {
+                    withTimeout(5000) { action() }
+                } catch (e: Exception) {
+                    terminate()
+                }
+            }
+        }
+    }
+
+    private fun enqueueAction(action: suspend () -> Unit) {
+        scope.launch { actionQueue.send(action) }
+    }
 
     fun initialize() {
         if (peerConnectionFactory != null) return
@@ -40,13 +66,13 @@ class WebRtcManager(private val context: Context, private val signalingSender: (
 
     fun createPeerConnection(isCaller: Boolean, onTrackReceived: ((MediaStreamTrack) -> Unit)? = null) {
         val iceServers = listOf(
-            IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-            IceServer.builder("turn:openrelay.metered.ca:80")
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
                 .setUsername("openrelayproject")
                 .setPassword("openrelayproject")
                 .createIceServer(),
-            IceServer.builder("turn:openrelay.metered.ca:443")
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
                 .setUsername("openrelayproject")
                 .setPassword("openrelayproject")
                 .createIceServer()
@@ -66,17 +92,16 @@ class WebRtcManager(private val context: Context, private val signalingSender: (
                     put("candidate", candidate.sdp)
                     put("sdpMid", candidate.sdpMid)
                     put("sdpMLineIndex", candidate.sdpMLineIndex)
+                    put("gen", sdpGeneration)
                 }
                 signalingSender(json.toString())
             }
-
             override fun onAddTrack(receiver: RtpReceiver, mediaStreams: Array<out MediaStream>) {
                 val track = receiver.track()
                 if (track != null) {
                     onTrackReceived?.invoke(track)
                 }
             }
-
             override fun onAddStream(stream: MediaStream) {}
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
@@ -87,33 +112,22 @@ class WebRtcManager(private val context: Context, private val signalingSender: (
             override fun onDataChannel(channel: DataChannel?) {}
             override fun onRenegotiationNeeded() {}
         })
-        
-        // Client relies completely on the Server's SDP to instantiate Transceivers.
-        // Doing this prevents Ghost Transceivers and lost network pipes.
-    }
-
-    fun setAudioDirection(direction: RtpTransceiver.RtpTransceiverDirection) {
-        val transceivers = peerConnection?.transceivers ?: return
-        val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO }
-        transceiver?.direction = direction
-    }
-
-    fun setVideoDirection(direction: RtpTransceiver.RtpTransceiverDirection) {
-        val transceivers = peerConnection?.transceivers ?: return
-        val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
-        transceiver?.direction = direction
     }
 
     fun setLocalVideoTrack(track: VideoTrack?) {
-        val transceivers = peerConnection?.transceivers ?: return
-        val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
-        transceiver?.sender?.setTrack(track, false)
+        enqueueAction {
+            val transceivers = peerConnection?.transceivers ?: return@enqueueAction
+            val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO }
+            transceiver?.sender?.setTrack(track, false)
+        }
     }
 
     fun setLocalAudioTrack(track: AudioTrack?) {
-        val transceivers = peerConnection?.transceivers ?: return
-        val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO }
-        transceiver?.sender?.setTrack(track, false)
+        enqueueAction {
+            val transceivers = peerConnection?.transceivers ?: return@enqueueAction
+            val transceiver = transceivers.firstOrNull { it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO }
+            transceiver?.sender?.setTrack(track, false)
+        }
     }
 
     fun setRemoteAudioEnabled(enabled: Boolean) {
@@ -124,41 +138,74 @@ class WebRtcManager(private val context: Context, private val signalingSender: (
     }
 
     fun terminate() {
-        peerConnection?.close()
-        peerConnection = null
+        enqueueAction {
+            peerConnection?.close()
+            peerConnection = null
+            iceCache.clear()
+            isRemoteDescriptionSet = false
+            sdpGeneration = 0
+        }
     }
 
     fun handleSignalingMessage(json: JSONObject) {
         val cmd = json.optString("cmd")
         when (cmd) {
             "webrtc_offer" -> {
-                val sdp = SessionDescription(SessionDescription.Type.OFFER, json.getString("sdp"))
-                peerConnection?.setRemoteDescription(SdpObserverImpl("setRemoteOffer"), sdp)
-                peerConnection?.createAnswer(SdpObserverImpl("answer"), MediaConstraints())
-            }
-            "webrtc_answer" -> {
-                val sdp = SessionDescription(SessionDescription.Type.ANSWER, json.getString("sdp"))
-                peerConnection?.setRemoteDescription(SdpObserverImpl("setRemoteAnswer"), sdp)
+                enqueueAction {
+                    sdpGeneration = json.optInt("gen", 0)
+                    iceCache.clear()
+                    isRemoteDescriptionSet = false
+                    val sdp = SessionDescription(SessionDescription.Type.OFFER, json.getString("sdp"))
+                    suspendSetRemoteDescription(sdp)
+                    isRemoteDescriptionSet = true
+                    iceCache.forEach { peerConnection?.addIceCandidate(it) }
+                    iceCache.clear()
+                    val answer = suspendCreateAnswer(MediaConstraints())
+                    suspendSetLocalDescription(answer)
+                    signalingSender(JSONObject().put("cmd", "webrtc_answer").put("sdp", answer.description).put("gen", sdpGeneration).toString())
+                }
             }
             "webrtc_ice" -> {
-                val candidate = IceCandidate(json.getString("sdpMid"), json.getInt("sdpMLineIndex"), json.getString("candidate"))
-                peerConnection?.addIceCandidate(candidate)
+                enqueueAction {
+                    val gen = json.optInt("gen", 0)
+                    if (gen == sdpGeneration) {
+                        val candidate = IceCandidate(json.getString("sdpMid"), json.getInt("sdpMLineIndex"), json.getString("candidate"))
+                        if (isRemoteDescriptionSet) {
+                            peerConnection?.addIceCandidate(candidate)
+                        } else {
+                            iceCache.add(candidate)
+                        }
+                    }
+                }
             }
         }
     }
 
-    private inner class SdpObserverImpl(val type: String) : SdpObserver {
-        override fun onCreateSuccess(sdp: SessionDescription) {
-            peerConnection?.setLocalDescription(this, sdp)
-            val json = JSONObject().apply {
-                put("cmd", if (sdp.type == SessionDescription.Type.OFFER) "webrtc_offer" else "webrtc_answer")
-                put("sdp", sdp.description)
-            }
-            signalingSender(json.toString())
-        }
-        override fun onSetSuccess() {}
-        override fun onCreateFailure(error: String?) {}
-        override fun onSetFailure(error: String?) {}
+    private suspend fun suspendCreateAnswer(constraints: MediaConstraints): SessionDescription = suspendCancellableCoroutine { cont ->
+        peerConnection?.createAnswer(object : SdpObserver {
+            override fun onCreateSuccess(sdp: SessionDescription) { if (cont.isActive) cont.resume(sdp) }
+            override fun onSetSuccess() {}
+            override fun onCreateFailure(error: String?) { if (cont.isActive) cont.resumeWithException(Exception(error)) }
+            override fun onSetFailure(error: String?) {}
+        }, constraints) ?: if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+    }
+
+    private suspend fun suspendSetLocalDescription(sdp: SessionDescription) = suspendCancellableCoroutine<Unit> { cont ->
+        peerConnection?.setLocalDescription(object : SdpObserver {
+            override fun onCreateSuccess(s: SessionDescription?) {}
+            override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
+            override fun onCreateFailure(e: String?) {}
+            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
+        }, sdp) ?: if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
+    }
+
+    private suspend fun suspendSetRemoteDescription(sdp: SessionDescription) = suspendCancellableCoroutine<Unit> { cont ->
+        peerConnection?.setRemoteDescription(object : SdpObserver {
+            override fun onCreateSuccess(s: SessionDescription?) {}
+            override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
+            override fun onCreateFailure(e: String?) {}
+            override fun onSetFailure(e: String?) { if (cont.isActive) cont.resumeWithException(Exception(e)) }
+        }, sdp) ?: if (cont.isActive) cont.resumeWithException(Exception("PeerConnection is null"))
     }
     
     fun getEglBaseContext(): EglBase.Context = eglBase.eglBaseContext
